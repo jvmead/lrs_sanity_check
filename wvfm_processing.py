@@ -65,11 +65,15 @@ def plot_summed_waveform_with_interactions(time_bins, wvfm, height, hits, i_mask
 # function for getting the data
 def bookkeeping(filename, is_data, summed=None, max_evts=None):
 
+    data = 'mc'
+    if is_data:
+        data = 'data'
+
     # get dirname
     if max_evts == None:
-        dirname = 'data_processed_'+filename+'_'+summed+'_evts_all'
+        dirname = data+'_processed_'+filename+'_'+summed+'_evts_all'
     else:
-        dirname = 'data_processed_'+filename+'_'+summed+'_evts_' + str(max_evts)
+        dirname = data+'_processed_'+filename+'_'+summed+'_evts_' + str(max_evts)
 
     # channel status
     channel_status_filename = 'channel_status/channel_status.csv'
@@ -95,8 +99,8 @@ def bookkeeping(filename, is_data, summed=None, max_evts=None):
     return dirname, channel_status_filename, geom_filename, calib_filename, maskfile
 
 
-
-def get_baseline_and_noise_threshold(wvfms, n_mad_factor=1.4826, max_iters=10, tol=1e-3):
+'''
+def get_baseline_and_noise_threshold(wvfms, n_mad_factor=5.0, max_iters=10, tol=1e-3):
     """
     Calculate the baseline and noise threshold iteratively using an iterative clipping approach.
 
@@ -149,7 +153,28 @@ def get_baseline_and_noise_threshold(wvfms, n_mad_factor=1.4826, max_iters=10, t
 
     print("Baseline and noise calculated, shapes:", baseline.shape, noise.shape)
     return baseline, noise
+'''
 
+# function for getting baseline and noise threshold per waveform per channel
+def get_baseline_and_noise_threshold(wvfms, n_mad_factor=5.0):
+    # Initialize median and MAD
+    median = np.median(wvfms, axis=-1)
+    mad = np.median(np.abs(wvfms - median[..., np.newaxis]), axis=-1)
+    # identify outliers in the waveform
+    mad_factor = n_mad_factor * mad
+    noise_mask = np.abs(wvfms - median[..., np.newaxis]) < mad_factor[..., np.newaxis]
+    print("Noise mask calculated, shape: ", noise_mask.shape)
+    # set non mask values to nan
+    noise_samples = np.where(noise_mask, wvfms, np.nan)
+    print("Noise samples calculated, shape: ", noise_samples.shape)
+    # calculate noise as stddev of noise_samples
+    noise = np.nanstd(noise_samples, axis=-1)
+    print("Noise calculated, shape: ", noise.shape)
+    # calculate baseline as mean of noise_samples
+    baseline = np.nanmean(noise_samples, axis=-1)
+    print("Baseline calculated, shape: ", baseline.shape)
+
+    return baseline, noise
 
 
 '''
@@ -222,7 +247,7 @@ def get_masks(geom_filename, channel_status_filename, summed, data_shape=[1, 8, 
 
 
 
-def get_data(filename, calib_filename, geom_filename, channel_status_filename, maskfile, max_evts):
+def get_data(filename, calib_filename, geom_filename, channel_status_filename, maskfile, max_evts, n_mad_factor=5.0):
 
     # load file
     with h5py.File(filename, 'r') as f:
@@ -244,14 +269,6 @@ def get_data(filename, calib_filename, geom_filename, channel_status_filename, m
 
         # summing channels by TPC, detector, or trap type
         if maskfile != None:
-            '''
-            # get channel status
-            channel_status = pd.read_csv(channel_status_filename, header=None)
-            # get geometry
-            geom = pd.read_csv(geom_filename, channel_status_filename, summed, data_shape)
-            # get masks
-            masks = get_masks(geom_filename, channel_status_filename, summed, data_shape)
-            '''
             masks_file = np.load(maskfile)
             masks = np.array(masks_file['masks'])
             print("Summed channels masks loaded, shape: ", masks.shape)
@@ -268,12 +285,13 @@ def get_data(filename, calib_filename, geom_filename, channel_status_filename, m
         print("Channels summed, shape: ", wvfms_summed.shape)
 
         # get baseline and noise threshold per waveform per channel
-        baselines, noise_thresholds = get_baseline_and_noise_threshold(wvfms_summed, n_mad_factor=1.5)
+        baselines, noise_thresholds = get_baseline_and_noise_threshold(wvfms_summed, n_mad_factor=n_mad_factor)
         print("Baselines and noise thresholds calculated, shapes: ", baselines.shape, noise_thresholds.shape)
         wvfms_blsub = wvfms_summed - baselines[..., np.newaxis]
         print("Baseline subtracted wvfms loaded, shape: ", wvfms_blsub.shape)
 
     return wvfms_blsub, noise_thresholds
+
 
 
 
@@ -335,15 +353,13 @@ def hitfinder(time_bins, wvfm, noise,
 
 # interaction finder function
 def interaction_finder(wvfm, noise,
-                       n_noise_factor = 40.0,
-                       #n_sqrt_factor = 1.0,
-                       n_bins_rolled = 1,
-                       n_sqrt_rt_factor = 3.0,
+                       n_noise_factor = 5.0,
+                       n_bins_rolled = 10,
+                       n_sqrt_rt_factor = 5.0,
                        pe_weight = 1.0):
 
   # save hitfinder settings to config
   hit_config = {'n_noise_factor': n_noise_factor,
-                #'n_sqrt_factor': n_sqrt_factor,
                 'n_bins_rolled': n_bins_rolled,
                 'n_sqrt_rt_factor': n_sqrt_rt_factor,
                 'pe_weight': pe_weight}
@@ -369,7 +385,7 @@ def interaction_finder(wvfm, noise,
 
 
 
-def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing, overwrite_hitfinder):
+def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing, overwrite_hitfinder, get_truth):
 
     # get bookkeeping
     filename = path.split('/')[-1]
@@ -443,6 +459,11 @@ def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing
             #hits_file = np.load(dirname+'/hits_evt.npz')
             #hits_evt = hits_file['arr_0']
 
+    # get truth info
+    if get_truth:
+        # WIP
+        print("Getting truth info...")
+
 
     else:
         print("Hitfinder not run")
@@ -459,6 +480,7 @@ if __name__ == "__main__":
     parser.add_argument('--run_hitfinder', action='store_true', help='Flag to indicate if hitfinder should be run')
     parser.add_argument('--opp', action='store_true', help='Flag to indicate if preprocessing should be overwritten')
     parser.add_argument('--ohf', action='store_true', help='Flag to indicate if hit finder output should be overwritten')
+    parser.add_argument('--get_truth', action='store_true', help='Flag to indicate if truth info should be extracted')
     args = parser.parse_args()
 
     ## timing info
@@ -473,7 +495,7 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # execute main function for preprocessing data
-    main(args.path, args.is_data, args.summed, args.max_evts, args.run_hitfinder, args.opp, args.ohf)
+    main(args.path, args.is_data, args.summed, args.max_evts, args.run_hitfinder, args.opp, args.ohf, args.get_truth)
 
     # end timer
     end_time = time.time()
