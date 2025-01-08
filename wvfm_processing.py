@@ -293,6 +293,59 @@ def get_data(filename, calib_filename, geom_filename, channel_status_filename, m
     return wvfms_blsub, noise_thresholds
 
 
+def get_truth(filename, file_idx, in_tpc==True):
+    # check if file exists
+    if not os.path.exists(filename):
+        print('File does not exist:', filename)
+        return None
+
+    # load file
+    with h5py.File(filename, 'r') as f:
+
+        # get the geometry info
+        tpc_bounds_mm = np.array(f['geometry_info'].attrs['module_RO_bounds'])
+
+        # get the event info
+        f_int = f["mc_truth/interactions/data"]
+        event_ids = f_int['event_id']
+        e_times = f_int['t_event']
+
+        # get the vertex info
+        vertex_ids = f_int['vertex_id']
+        v_times = f_int['t_vert']
+        v_x = f_int['x_vert']
+        v_y = f_int['y_vert']
+        v_z = f_int['z_vert']
+
+        # for each event, find the TPC number
+        start_tpcs = np.full(len(v_x), -1, dtype=int)
+        for j in range(len(tpc_bounds_mm)):
+            mask = (v_x > tpc_bounds_mm[j][0][0]) & (v_x < tpc_bounds_mm[j][1][0]) & \
+                   (v_y > tpc_bounds_mm[j][0][1]) & (v_y < tpc_bounds_mm[j][1][1]) & \
+                   (v_z > tpc_bounds_mm[j][0][2]) & (v_z < tpc_bounds_mm[j][1][2])
+            start_tpcs[mask] = j
+
+        # convert start time to ticks
+        start_times = (v_times - e_times)
+        start_ticks = np.round(start_times * 1000/16, 0)
+
+        # save event number, tpc number and start time
+        file_idxs = np.full(len(event_ids), file_idx, dtype=int)
+        event_tpc_start = np.column_stack((file_idxs, event_ids, start_tpcs,
+                                           start_times, start_ticks,
+                                           v_x, v_y, v_z))
+
+        # remove lines with negative tpc numbers
+        if in_tpc:
+            mask = (start_tpcs >= 0)
+            event_tpc_start = event_tpc_start[mask]
+
+        # if first file, create the dataframe
+        cols = ['file_idx', 'event_id', 'tpc_num',
+                'start_time', 'start_time_idx',
+                'v_x', 'v_y', 'v_z']
+
+        return event_tpc_start
 
 
 '''
@@ -462,8 +515,20 @@ def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing
     # get truth info
     if get_truth:
         # WIP
+        i = 0
         print("Getting truth info...")
-
+        truth_information = get_truth(filename, i, True)
+        # save as csv file
+        cols = ['file_idx', 'event_id', 'tpc_num',
+                'start_time', 'start_time_idx',
+                'v_x', 'v_y', 'v_z']
+        if i==0:
+            df = pd.DataFrame(truth_information, columns=cols)
+            df.to_csv(dirname+'/true_nu_int.csv', index=False)
+        # for subsequent files, append to the dataframe
+        else:
+            df = pd.DataFrame(truth_information, columns=cols)
+            df.to_csv(dirname+'/true_nu_int.csv', index=False, mode='a', header=False)
 
     else:
         print("Hitfinder not run")
