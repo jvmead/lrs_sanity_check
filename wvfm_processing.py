@@ -293,7 +293,7 @@ def get_data(filename, calib_filename, geom_filename, channel_status_filename, m
     return wvfms_blsub, noise_thresholds
 
 
-def get_truth(filename, file_idx, in_tpc==True):
+def get_truth(filename, file_idx, in_tpc=False):
     # check if file exists
     if not os.path.exists(filename):
         print('File does not exist:', filename)
@@ -307,12 +307,12 @@ def get_truth(filename, file_idx, in_tpc==True):
 
         # get the event info
         f_int = f["mc_truth/interactions/data"]
-        event_ids = f_int['event_id']
+        event_ids = f_int['event_id'].astype(int)
         e_times = f_int['t_event']
 
         # get the vertex info
-        vertex_ids = f_int['vertex_id']
-        v_times = f_int['t_vert']
+        vertex_ids = f_int['vertex_id'].astype(int)
+        v_times = f_int['t_vert'] # spill time offset
         v_x = f_int['x_vert']
         v_y = f_int['y_vert']
         v_z = f_int['z_vert']
@@ -328,11 +328,12 @@ def get_truth(filename, file_idx, in_tpc==True):
         # convert start time to ticks
         start_times = (v_times - e_times)
         start_ticks = np.round(start_times * 1000/16, 0)
+        start_ticks = start_ticks.astype(int)
 
         # save event number, tpc number and start time
         file_idxs = np.full(len(event_ids), file_idx, dtype=int)
-        event_tpc_start = np.column_stack((file_idxs, event_ids, start_tpcs,
-                                           start_times, start_ticks,
+        event_tpc_start = np.column_stack((file_idxs, event_ids, #vertex_ids,
+                                           start_tpcs, start_times, start_ticks,
                                            v_x, v_y, v_z))
 
         # remove lines with negative tpc numbers
@@ -341,8 +342,8 @@ def get_truth(filename, file_idx, in_tpc==True):
             event_tpc_start = event_tpc_start[mask]
 
         # if first file, create the dataframe
-        cols = ['file_idx', 'event_id', 'tpc_num',
-                'start_time', 'start_time_idx',
+        cols = ['file_idx', 'event_id', #'vertex_id',
+                'tpc_num', 'start_time', 'start_time_idx',
                 'v_x', 'v_y', 'v_z']
 
         return event_tpc_start
@@ -438,7 +439,7 @@ def interaction_finder(wvfm, noise,
 
 
 
-def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing, overwrite_hitfinder, get_truth):
+def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing, overwrite_hitfinder, save_truth):
 
     # get bookkeeping
     filename = path.split('/')[-1]
@@ -457,6 +458,7 @@ def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing
         config = {'timestamp': str(pd.Timestamp.now()),
                   'filename': path,
                   'is_data': is_data,
+                  'save_truth': save_truth,
                   'summed': summed,
                   'max_evts': max_evts,
                   'calib_filename': calib_filename,
@@ -513,22 +515,27 @@ def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing
             #hits_evt = hits_file['arr_0']
 
     # get truth info
-    if get_truth:
+    if is_data and save_truth:
+        print("No truth information for data...")
+    if save_truth and not is_data:
         # WIP
         i = 0
         print("Getting truth info...")
-        truth_information = get_truth(filename, i, True)
+        truth_information = get_truth(path, i, False)
         # save as csv file
-        cols = ['file_idx', 'event_id', 'tpc_num',
-                'start_time', 'start_time_idx',
+        cols = ['file_idx', 'event_id', #'vertex_id',
+                'tpc_num', 'start_time', 'start_time_idx',
                 'v_x', 'v_y', 'v_z']
+        true_int_output = dirname+'/true_nu_int.csv'
         if i==0:
+            print("Creating output: ", true_int_output)
             df = pd.DataFrame(truth_information, columns=cols)
-            df.to_csv(dirname+'/true_nu_int.csv', index=False)
+            df.to_csv(true_int_output, index=False)
         # for subsequent files, append to the dataframe
         else:
+            print("Appending to output: ", true_int_output)
             df = pd.DataFrame(truth_information, columns=cols)
-            df.to_csv(dirname+'/true_nu_int.csv', index=False, mode='a', header=False)
+            df.to_csv(true_int_output, index=False, mode='a', header=False)
 
     else:
         print("Hitfinder not run")
