@@ -307,11 +307,15 @@ def get_truth(filename, file_idx, in_tpc=False):
 
         # get the event info
         f_int = f["mc_truth/interactions/data"]
+        print("Interactions MC truth loaded, shape: ", f_int.shape)
+
+        print("Number of unique event ids: ", len(np.unique(f_int['event_id'])))
         event_ids = f_int['event_id'].astype(int)
+
+        # print event number and event id next to each other index by index
         e_times = f_int['t_event']
 
         # get the vertex info
-        vertex_ids = f_int['vertex_id'].astype(int)
         v_times = f_int['t_vert'] # spill time offset
         v_x = f_int['x_vert']
         v_y = f_int['y_vert']
