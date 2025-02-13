@@ -61,7 +61,6 @@ def plot_summed_waveform_with_interactions(time_bins, wvfm, height, hits, i_mask
   plt.show()
 
 
-
 # function for getting the data
 def bookkeeping(filename, is_data, summed=None, max_evts=None):
 
@@ -99,62 +98,6 @@ def bookkeeping(filename, is_data, summed=None, max_evts=None):
     return dirname, channel_status_filename, geom_filename, calib_filename, maskfile
 
 
-'''
-def get_baseline_and_noise_threshold(wvfms, n_mad_factor=5.0, max_iters=10, tol=1e-3):
-    """
-    Calculate the baseline and noise threshold iteratively using an iterative clipping approach.
-
-    Parameters:
-    - wvfms: np.ndarray
-        Waveforms array (shape: [n_waveforms, n_samples]).
-    - n_mad_factor: float
-        Threshold factor for outlier detection (default: 1.5).
-    - max_iters: int
-        Maximum number of iterations (default: 10).
-    - tol: float
-        Convergence tolerance for baseline change (default: 1e-3).
-
-    Returns:
-    - baseline: np.ndarray
-        Baseline estimate per waveform.
-    - noise: np.ndarray
-        Noise (standard deviation) per waveform.
-    """
-    # Initialize median and MAD for the first iteration
-    median = np.median(wvfms, axis=-1)
-    mad = np.median(np.abs(wvfms - median[..., np.newaxis]), axis=-1)
-
-    # Initialize baseline and noise
-    baseline = median
-    noise = 1.4826 * mad  # Convert MAD to standard deviation
-
-    for i in range(max_iters):
-        # Mask out samples outside the noise range
-        noise_mask = np.abs(wvfms - baseline[..., np.newaxis]) < n_mad_factor * noise[..., np.newaxis]
-
-        # Update noise samples with mask
-        noise_samples = np.where(noise_mask, wvfms, np.nan)
-
-        # Calculate new baseline and noise
-        new_baseline = np.nanmean(noise_samples, axis=-1)
-        new_noise = np.nanstd(noise_samples, axis=-1)
-
-        # Check for convergence
-        if np.all(np.isclose(new_baseline, baseline, atol=tol)):
-            print(f"Converged after {i + 1} iterations.")
-            break
-
-        # Update baseline and noise for the next iteration
-        baseline = new_baseline
-        noise = new_noise
-
-    else:
-        print("Reached maximum iterations without full convergence.")
-
-    print("Baseline and noise calculated, shapes:", baseline.shape, noise.shape)
-    return baseline, noise
-'''
-
 # function for getting baseline and noise threshold per waveform per channel
 def get_baseline_and_noise_threshold(wvfms, n_mad_factor=5.0):
     # Initialize median and MAD
@@ -175,76 +118,6 @@ def get_baseline_and_noise_threshold(wvfms, n_mad_factor=5.0):
     print("Baseline calculated, shape: ", baseline.shape)
 
     return baseline, noise
-
-
-'''
-# get masks to sum channels in TPC or detector quickly
-def get_masks(geom_filename, channel_status_filename, summed, data_shape=[1, 8, 64, 1000]):
-
-    # load geometry
-    geom = pd.read_csv(geom_filename)
-
-    # get channel status
-    channel_status = pd.read_csv(channel_status_filename, header=None)
-
-    # data shape
-    n_evts = data_shape[0]
-    n_adcs = data_shape[1]
-    n_channels = data_shape[2]
-    n_samples = data_shape[3]
-
-    # get masks per TPC
-    if summed == 'TPC':
-        n_masks = len(np.unique(geom[summed]))
-        masks = np.zeros((n_masks, n_adcs, n_channels))
-        # for each TPC, make an 8x64 mask
-        for i in range(n_masks):
-            tpc_mask = geom['TPC'] == i
-            # get adc and channel numbers for this TPC
-            adcs = geom['ADC'][tpc_mask]
-            channels = geom['Channel'][tpc_mask]
-            # set mask
-            masks[i, adcs, channels] = 1
-
-    # get masks per detector
-    elif summed == 'Detector':
-        n_masks = len(np.unique(geom[summed]))
-        masks = np.zeros((n_masks, n_adcs, n_channels))
-
-        # for each detector, make an 8x64 mask
-        for i in range(n_masks):
-            det_mask = geom['Detector'] == i
-            # get adc and channel numbers for this detector
-            adcs = geom['ADC'][det_mask]
-            channels = geom['Channel'][det_mask]
-            # set mask
-            masks[i, adcs, channels] = 1
-
-    # get masks per trap type in each TPC
-    elif summed == 'TrapType':
-        n_masks = len(np.unique(geom['TPC'])) * 2 # len(np.unique(geom[summed]))
-        masks = np.zeros((n_masks, n_adcs, n_channels))
-        # for each TRP, make an 8x64 mask
-        for i in range(len(np.unique(geom['TPC']))):
-            tpc_mask = geom['TPC'] == i
-            acl_mask = geom['TrapType'] == 0
-            lcm_mask = geom['TrapType'] == 1
-            # set acl masks
-            acl_adcs = geom['ADC'][tpc_mask & acl_mask]
-            acl_channels = geom['Channel'][tpc_mask & acl_mask]
-            masks[i, acl_adcs, acl_channels] = 1
-            # set lcm masks
-            lcm_adcs = geom['ADC'][tpc_mask & lcm_mask]
-            lcm_channels = geom['Channel'][tpc_mask & lcm_mask]
-            masks[2*(i+1)-1, lcm_adcs, lcm_channels] = 1
-
-    # good channels only
-    channel_status_mask = channel_status == 0
-    masks[:,~channel_status_mask] = 0
-
-    return masks
-'''
-
 
 
 def get_data(filename, calib_filename, geom_filename, channel_status_filename, maskfile, max_evts, n_mad_factor=5.0):
@@ -382,62 +255,6 @@ def get_truth(filename, file_idx, in_tpc=False):
             event_tpc_start = event_tpc_start[mask]
 
         return event_tpc_start
-
-
-'''
-# hit finder function
-def hitfinder(time_bins, wvfm, noise,
-            n_noise_factor = 5.0,
-            n_sqrt_factor = 1.0):
-
-  # height = flat threshold over noise (n*sigma)
-  height = n_noise_factor * noise
-  sqrt_height = np.sqrt(height)
-
-  # hits
-  hits = []
-
-  # Find indices where waveform exceeds threshold
-  bins_over_threshold = np.where(wvfm > height)[0]
-  bins_below_threshold = np.where(wvfm < height - n_sqrt_factor*sqrt_height)[0]
-  while len(bins_over_threshold) > 0:
-    # Find the start of a hit (first index above threshold)
-    t_i = bins_over_threshold[0]
-
-    # Find next index below lower threshold that comes after t_i
-    bins_below_after_ti = bins_below_threshold[bins_below_threshold > t_i]
-    if len(bins_below_after_ti) == 0:
-      break  # Exit if no bins are below threshold after t_i
-    t_f = bins_below_after_ti[0]
-
-    # if the hit starts at t=0 then skip it
-    if t_i == 0:
-      bins_over_threshold = bins_over_threshold[bins_over_threshold > t_f]
-      continue
-
-    # Calculate start time and time over threshold (ToT)
-    t0 = time_bins[t_i]
-    tf = time_bins[t_f]
-    tot = time_bins[t_f] - t0
-
-    # Calculate height of the highest bin in the ToT window
-    hit_window = wvfm[t_i : t_f+1]
-    max_height = np.max(hit_window)
-    t_max = time_bins[t_i + np.argmax(hit_window)]
-    #t_max_idx = t_i + np.argmax(hit_window)
-
-    # Calculate integral of the waveform in the ToT window
-    integral = np.sum(hit_window)
-
-    # append hit information with t0, tf, tot, t_max, height, integral
-    hits.append((t0, tf, tot, t_max, max_height, integral))
-
-    # Update bins_over_threshold to exclude processed region
-    bins_over_threshold = bins_over_threshold[bins_over_threshold > t_f]
-
-    return hits
-    '''
-
 
 
 # interaction finder function
