@@ -305,50 +305,81 @@ def get_truth(filename, file_idx, in_tpc=False):
         # get the geometry info
         tpc_bounds_mm = np.array(f['geometry_info'].attrs['module_RO_bounds'])
 
-        # get the event info
-        f_int = f["mc_truth/interactions/data"]
-        print("Interactions MC truth loaded, shape: ", f_int.shape)
+        # get event in data
+        light_wvfms = f['light/wvfm/data']['samples']
+        #i_evt_lrs = np.linspace(0, light_wvfms.shape[0]-1, light_wvfms.shape[0], dtype=int)
 
-        print("Number of unique event ids: ", len(np.unique(f_int['event_id'])))
-        event_ids = f_int['event_id'].astype(int)
+        # for each unique vertex_id, get the segment with the min time
+        first_seg_idxs = []
+        first_seg_tpcs = []
+        first_seg_file_ids = []
+        first_seg_evt_ids = []
+        first_seg_x = []
+        first_seg_y = []
+        first_seg_z = []
 
-        # print event number and event id next to each other index by index
-        e_times = f_int['t_event']
+        # loop over events
+        for i_evt_lrs in range(light_wvfms.shape[0]):
 
-        # get the vertex info
-        v_times = f_int['t_vert'] # spill time offset
-        v_x = f_int['x_vert']
-        v_y = f_int['y_vert']
-        v_z = f_int['z_vert']
+            # get the light waveforms
+            light_data = light_wvfms[i_evt_lrs]
 
-        # for each event, find the TPC number
-        start_tpcs = np.full(len(v_x), -1, dtype=int)
-        for j in range(len(tpc_bounds_mm)):
-            mask = (v_x > tpc_bounds_mm[j][0][0]) & (v_x < tpc_bounds_mm[j][1][0]) & \
-                   (v_y > tpc_bounds_mm[j][0][1]) & (v_y < tpc_bounds_mm[j][1][1]) & \
-                   (v_z > tpc_bounds_mm[j][0][2]) & (v_z < tpc_bounds_mm[j][1][2])
-            start_tpcs[mask] = j
+            # get segment to vertex matching
+            mc_seg_data = f["mc_truth/segments/data"]
+            spill_id = np.unique(mc_seg_data["event_id"])[i_evt_lrs]
+            ev_seg_ids = np.where(mc_seg_data["event_id"]==spill_id)[0]
+            ev_truth_light = f["mc_truth/light/data"][ev_seg_ids]
 
-        # convert start time to ticks
-        start_times = (v_times - e_times)
-        start_ticks = np.round(start_times * 1000/16, 0)
-        start_ticks = start_ticks.astype(int)
+            # get segment vertex_id
+            int_seg_ids = mc_seg_data["vertex_id"][ev_seg_ids]
+
+            # get segment times
+            segment_times = mc_seg_data["t0_start"][ev_seg_ids]
+            segment_idxs = segment_times%1.2e6*(1000.0/16.0)+100
+
+            # segment coordinates
+            seg_x = mc_seg_data["x_start"][ev_seg_ids]
+            seg_y = mc_seg_data["y_start"][ev_seg_ids]
+            seg_z = mc_seg_data["z_start"][ev_seg_ids]
+
+            for i in np.unique(int_seg_ids):
+
+                idx = np.where(int_seg_ids==i)[0]
+                first_seg_time = np.argmin(segment_times[idx])
+                first_seg_idx = first_seg_time%1.2e6*(1000.0/16.0)+100
+                first_seg_idxs.append(segment_idxs[idx])
+
+                # for each event, find the TPC number
+                first_seg_tpc = np.full(len(seg_x), -1, dtype=int)
+                for j in range(len(tpc_bounds_mm)):
+                    mask = (seg_x > tpc_bounds_mm[j][0][0]) & (seg_x < tpc_bounds_mm[j][1][0]) & \
+                        (seg_y > tpc_bounds_mm[j][0][1]) & (seg_y < tpc_bounds_mm[j][1][1]) & \
+                        (seg_z > tpc_bounds_mm[j][0][2]) & (seg_z < tpc_bounds_mm[j][1][2])
+                    first_seg_tpc[mask] = j
+                first_seg_tpcs.append(first_seg_tpc)
+
+                # add file and event ids
+                first_seg_file_ids.append(file_idx)
+                first_seg_evt_ids.append(spill_id)
+
+                # add vertex coordinates
+                first_seg_x.append(seg_x[idx])
+                first_seg_y.append(seg_y[idx])
+                first_seg_z.append(seg_z[idx])
 
         # save event number, tpc number and start time
-        file_idxs = np.full(len(event_ids), file_idx, dtype=int)
-        event_tpc_start = np.column_stack((file_idxs, event_ids, #vertex_ids,
-                                           start_tpcs, start_times, start_ticks,
-                                           v_x, v_y, v_z))
-
-        # remove lines with negative tpc numbers
-        if in_tpc:
-            mask = (start_tpcs >= 0)
-            event_tpc_start = event_tpc_start[mask]
+        event_tpc_start = np.column_stack((first_seg_file_ids, first_seg_evt_ids,
+                                           first_seg_time, first_seg_idx,
+                                           first_seg_tpcs, first_seg_x, first_seg_y, first_seg_z))
 
         # if first file, create the dataframe
-        cols = ['file_idx', 'event_id', #'vertex_id',
-                'tpc_num', 'start_time', 'start_time_idx',
-                'v_x', 'v_y', 'v_z']
+        cols = ['file_idx', 'event_id',
+                'start_time', 'start_time_idx',
+                'tpc_num', 'v_x', 'v_y', 'v_z']
+
+        if in_tpc:
+            mask = (first_seg_tpcs >= 0)
+            event_tpc_start = event_tpc_start[mask]
 
         return event_tpc_start
 
@@ -443,7 +474,7 @@ def interaction_finder(wvfm, noise,
 
 
 
-def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing, overwrite_hitfinder, save_truth):
+def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing, overwrite_hitfinder, save_truth, is_cont):
 
     # get bookkeeping
     filename = path.split('/')[-1]
@@ -525,7 +556,7 @@ def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing
         # WIP
         i = 0
         print("Getting truth info...")
-        truth_information = get_truth(path, i, False)
+        truth_information = get_truth(path, i, is_cont)
         # save as csv file
         cols = ['file_idx', 'event_id', #'vertex_id',
                 'tpc_num', 'start_time', 'start_time_idx',
@@ -557,6 +588,7 @@ if __name__ == "__main__":
     parser.add_argument('--opp', action='store_true', help='Flag to indicate if preprocessing should be overwritten')
     parser.add_argument('--ohf', action='store_true', help='Flag to indicate if hit finder output should be overwritten')
     parser.add_argument('--get_truth', action='store_true', help='Flag to indicate if truth info should be extracted')
+    parser.add_argument('--is_cont', action='store_true', help='Flag to indicate if the vertices are contained in active volume')
     args = parser.parse_args()
 
     ## timing info
@@ -571,7 +603,7 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # execute main function for preprocessing data
-    main(args.path, args.is_data, args.summed, args.max_evts, args.run_hitfinder, args.opp, args.ohf, args.get_truth)
+    main(args.path, args.is_data, args.summed, args.max_evts, args.run_hitfinder, args.opp, args.ohf, args.get_truth, args.is_cont)
 
     # end timer
     end_time = time.time()

@@ -43,7 +43,7 @@ def get_masks(geom_filename, channel_status_filename, summed, data_shape=[1, 8, 
             masks[i, adcs, channels] = 1
 
     elif summed == 'TrapType':
-        n_masks = len(np.unique(geom['TPC'])) * 2 # len(np.unique(geom[summed]))
+        n_masks = len(np.unique(geom['TPC'])) * 2
         masks = np.zeros((n_masks, n_adcs, n_channels))
         # for each TRP, make an 8x64 mask
         for i in range(len(np.unique(geom['TPC']))):
@@ -53,11 +53,11 @@ def get_masks(geom_filename, channel_status_filename, summed, data_shape=[1, 8, 
             # set acl masks
             acl_adcs = geom['ADC'][tpc_mask & acl_mask]
             acl_channels = geom['Channel'][tpc_mask & acl_mask]
-            masks[i, acl_adcs, acl_channels] = 1
+            masks[2*i, acl_adcs, acl_channels] = 1
             # set lcm masks
             lcm_adcs = geom['ADC'][tpc_mask & lcm_mask]
             lcm_channels = geom['Channel'][tpc_mask & lcm_mask]
-            masks[2*(i+1)-1, lcm_adcs, lcm_channels] = 1
+            masks[2*i+1, lcm_adcs, lcm_channels] = 1
 
     # good channels only
     channel_status_mask = channel_status == 0
@@ -66,17 +66,17 @@ def get_masks(geom_filename, channel_status_filename, summed, data_shape=[1, 8, 
     return masks
 
 # Example usage
-is_data = True
+is_data = False
 if is_data:
-    geom_filename = 'geom_files/light_module_desc-5.0.0.csv'
+    geom_filename = '../geom_files/light_module_desc-5.0.0.csv'
 else:
-    geom_filename = 'geom_files/light_module_desc-4.0.0.csv'
-channel_status_filename = 'channel_status/channel_status.csv'
-summed = 'Detector'
+    geom_filename = '../geom_files/light_module_desc-4.0.0.csv'
+channel_status_filename = '../channel_status/channel_status.csv'
+summed = 'TPC'
 data_shape = [1, 8, 64, 1000]
 masks = get_masks(geom_filename, channel_status_filename, summed, data_shape)
 
 # save masks to file
 data = 'data' if is_data else 'MC'
 # save as npz file
-np.savez('channel_sum_masks/{}_masks_{}.npz'.format(summed, data), masks=masks)
+np.savez('{}_masks_{}.npz'.format(summed, data), masks=masks)
