@@ -176,7 +176,26 @@ def get_truth(filename, file_idx, in_tpc=False):
     with h5py.File(filename, 'r') as f:
 
         # get the geometry info
-        tpc_bounds_mm = np.array(f['geometry_info'].attrs['module_RO_bounds'])
+        mod_bounds_mm = np.array(f['geometry_info'].attrs['module_RO_bounds'])
+        tpc_bounds_mm = []
+
+        for i,mod in enumerate(mod_bounds_mm):
+            x_min = mod[0][0]
+            x_max = mod[1][0]
+            y_min = mod[0][1]
+            y_max = mod[1][1]
+            z_min = mod[0][2]
+            z_max = mod[1][2]
+
+            # split modules in half, using max_drift_distance from outer x-facing edge
+            max_drift_distance = f['geometry_info'].attrs['max_drift_distance']
+            x_min_adj = x_max - max_drift_distance
+            # ordering TPC number in descending x
+            tpc_bounds_mm.append(((x_min_adj, y_min, z_min), (x_max, y_max, z_max)))
+            x_max_adj = x_min + max_drift_distance
+            tpc_bounds_mm.append(((x_min, y_min, z_min), (x_max_adj, y_max, z_max)))
+
+        tpc_bounds_mm = np.array(tpc_bounds_mm)
 
         # get event in data
         light_wvfms = f['light/wvfm/data']['samples']
