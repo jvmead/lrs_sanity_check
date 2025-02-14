@@ -199,75 +199,107 @@ def get_truth(filename, file_idx, in_tpc=False):
 
         # get event in data
         light_wvfms = f['light/wvfm/data']['samples']
-        #i_evt_lrs = np.linspace(0, light_wvfms.shape[0]-1, light_wvfms.shape[0], dtype=int)
 
         # for each unique vertex_id, get the segment with the min time
-        first_seg_idxs = []
-        first_seg_tpcs = []
         first_seg_file_ids = []
         first_seg_evt_ids = []
+        '''
+        vertex_ids = []
+        vertex_xs = []
+        vertex_ys = []
+        vertex_zs = []
+        vertex_ts = []
+
+        first_seg_ids = []
+        '''
         first_seg_x = []
         first_seg_y = []
         first_seg_z = []
+        first_seg_tpcs = []
+        first_seg_idxs = []
+        first_seg_times = []
 
         # loop over events
         for i_evt_lrs in range(light_wvfms.shape[0]):
 
-            # get the light waveforms
-            light_data = light_wvfms[i_evt_lrs]
-
             # get segment to vertex matching
-            mc_seg_data = f["mc_truth/segments/data"]
-            spill_id = np.unique(mc_seg_data["event_id"])[i_evt_lrs]
-            ev_seg_ids = np.where(mc_seg_data["event_id"]==spill_id)[0]
-            ev_truth_light = f["mc_truth/light/data"][ev_seg_ids]
+            spill_id = np.unique(f["mc_truth/segments/data"]["event_id"])[i_evt_lrs]
+            ev_seg_ids = np.where(f["mc_truth/segments/data"]["event_id"]==spill_id)[0]
 
-            # get segment vertex_id
-            int_seg_ids = mc_seg_data["vertex_id"][ev_seg_ids]
+            # get segment's vertex_id and time
+            int_seg_ids = f["mc_truth/segments/data"]["vertex_id"][ev_seg_ids]
 
             # get segment times
-            segment_times = mc_seg_data["t0_start"][ev_seg_ids]
+            segment_times = f["mc_truth/segments/data"]["t0_start"][ev_seg_ids]
+
+            # get segment idxs
             segment_idxs = segment_times%1.2e6*(1000.0/16.0)+100
 
             # segment coordinates
-            seg_x = mc_seg_data["x_start"][ev_seg_ids]
-            seg_y = mc_seg_data["y_start"][ev_seg_ids]
-            seg_z = mc_seg_data["z_start"][ev_seg_ids]
+            seg_xs = f["mc_truth/segments/data"]["x_start"][ev_seg_ids]
+            seg_ys = f["mc_truth/segments/data"]["y_start"][ev_seg_ids]
+            seg_zs = f["mc_truth/segments/data"]["z_start"][ev_seg_ids]
 
-            for i in np.unique(int_seg_ids):
+            # loop over unique vertex ids
+            unique_int_seg_ids = np.unique(int_seg_ids)
 
-                idx = np.where(int_seg_ids==i)[0]
-                first_seg_time = np.argmin(segment_times[idx])
-                first_seg_idx = first_seg_time%1.2e6*(1000.0/16.0)+100
-                first_seg_idxs.append(segment_idxs[idx])
+            # loop over segments to find the first segment for each vertex
+            for int in unique_int_seg_ids:
+                segs = np.where(int_seg_ids==int)[0]
 
-                # for each event, find the TPC number
-                first_seg_tpc = np.full(len(seg_x), -1, dtype=int)
-                for j in range(len(tpc_bounds_mm)):
-                    mask = (seg_x > tpc_bounds_mm[j][0][0]) & (seg_x < tpc_bounds_mm[j][1][0]) & \
-                        (seg_y > tpc_bounds_mm[j][0][1]) & (seg_y < tpc_bounds_mm[j][1][1]) & \
-                        (seg_z > tpc_bounds_mm[j][0][2]) & (seg_z < tpc_bounds_mm[j][1][2])
-                    first_seg_tpc[mask] = j
-                first_seg_tpcs.append(first_seg_tpc)
+                # earliest segment
+                seg_times = segment_times[segs]
+                first_seg = np.argmin(seg_times)
+                first_seg_time = seg_times[first_seg]
+                first_seg_idx = segment_idxs[first_seg]
+
+                # add segment time and sample index
+                first_seg_times.append(first_seg_time)
+                first_seg_idxs.append(first_seg_idx)
 
                 # add file and event ids
                 first_seg_file_ids.append(file_idx)
                 first_seg_evt_ids.append(spill_id)
 
+                # for each event, find the TPC number
+                seg_x = seg_xs[first_seg]
+                seg_y = seg_ys[first_seg]
+                seg_z = seg_zs[first_seg]
+
                 # add vertex coordinates
-                first_seg_x.append(seg_x[idx])
-                first_seg_y.append(seg_y[idx])
-                first_seg_z.append(seg_z[idx])
+                first_seg_x.append(seg_x)
+                first_seg_y.append(seg_y)
+                first_seg_z.append(seg_z)
+
+                # find the TPC number
+                first_seg_tpc = -1
+                tpc_mask = np.zeros(len(tpc_bounds_mm))
+                for j in range(len(tpc_bounds_mm)):
+                    tpc_mask[j] = (seg_x > tpc_bounds_mm[j][0][0]) & (seg_x < tpc_bounds_mm[j][1][0]) & \
+                                  (seg_y > tpc_bounds_mm[j][0][1]) & (seg_y < tpc_bounds_mm[j][1][1]) & \
+                                  (seg_z > tpc_bounds_mm[j][0][2]) & (seg_z < tpc_bounds_mm[j][1][2])
+
+                if np.sum(tpc_mask) > 1:
+                    print("More than one TPC found for segment!")
+                    break
+                elif np.sum(tpc_mask) == 1:
+                    first_seg_tpc = np.where(tpc_mask)[0][0]
+
+                # add TPC number
+                first_seg_tpcs.append(first_seg_tpc)
 
         # save event number, tpc number and start time
         event_tpc_start = np.column_stack((first_seg_file_ids, first_seg_evt_ids,
-                                           first_seg_time, first_seg_idx,
+                                           first_seg_times, first_seg_idxs,
                                            first_seg_tpcs, first_seg_x, first_seg_y, first_seg_z))
 
         # if first file, create the dataframe
+        '''
         cols = ['file_idx', 'event_id',
-                'start_time', 'start_time_idx',
-                'tpc_num', 'v_x', 'v_y', 'v_z']
+                'vertex_id','v_x', 'v_y', 'v_z', 'v_t',
+                'seg_id', 'seg_x', 'seg_y', 'seg_z',
+                'tpc_num', 'start_time', 'start_time_idx']
+        '''
 
         if in_tpc:
             mask = (first_seg_tpcs >= 0)
@@ -341,7 +373,8 @@ def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing
         print("Config file created: config.json")
 
         # get data
-        spes_evt, noise_evt = get_data(path, calib_filename, geom_filename, channel_status_filename, maskfile, max_evts)
+        # n_mad_factor = 1.4826 # mad->stddev
+        spes_evt, noise_evt = get_data(path, calib_filename, geom_filename, channel_status_filename, maskfile, max_evts)#, n_mad_factor=5.0)
         print("Data processed, shapes: ", spes_evt.shape, noise_evt.shape)
 
         # save data
@@ -388,15 +421,24 @@ def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing
     # get truth info
     if is_data and save_truth:
         print("No truth information for data...")
+
     if save_truth and not is_data:
-        # WIP
+        # file number (muliptle files WIP)
         i = 0
+
         print("Getting truth info...")
         truth_information = get_truth(path, i, is_cont)
+
         # save as csv file
-        cols = ['file_idx', 'event_id', #'vertex_id',
-                'tpc_num', 'start_time', 'start_time_idx',
-                'v_x', 'v_y', 'v_z']
+        '''
+        cols = ['file_idx', 'event_id',
+                'vertex_id','v_x', 'v_y', 'v_z', 'v_t',
+                'seg_id', 'seg_x', 'seg_y', 'seg_z',
+                'tpc_num', 'start_time', 'start_time_idx']
+        '''
+        cols = ['file_idx', 'event_id',
+                'start_time', 'start_time_idx',
+                'tpc_num', 'v_x', 'v_y', 'v_z']
         true_int_output = dirname+'/true_nu_int.csv'
         if i==0:
             print("Creating output: ", true_int_output)
@@ -407,9 +449,8 @@ def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing
             print("Appending to output: ", true_int_output)
             df = pd.DataFrame(truth_information, columns=cols)
             df.to_csv(true_int_output, index=False, mode='a', header=False)
-
     else:
-        print("Hitfinder not run")
+        print("Truth information not saved!")
 
 
 
