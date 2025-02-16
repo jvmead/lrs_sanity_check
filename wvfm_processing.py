@@ -259,7 +259,7 @@ def get_truth(filename, file_idx, in_tpc=False):
 
                 # add file and event ids
                 first_seg_file_ids.append(file_idx)
-                first_seg_evt_ids.append(spill_id)
+                first_seg_evt_ids.append(i_evt_lrs) #spill_id)
 
                 # for each event, find the TPC number
                 seg_x = seg_xs[first_seg]
