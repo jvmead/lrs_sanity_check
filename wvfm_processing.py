@@ -175,6 +175,14 @@ def get_truth(filename, file_idx, in_tpc=False):
     # load file
     with h5py.File(filename, 'r') as f:
 
+        # for each unique vertex_id, get the segment with the min time per TPC
+        first_seg_file_ids = []
+        first_seg_evt_ids = []
+        first_seg_vertex_ids = []
+        first_seg_tpcs = []
+        first_seg_idxs = []
+        first_seg_times = []
+
         # get the geometry info
         mod_bounds_mm = np.array(f['geometry_info'].attrs['module_RO_bounds'])
         tpc_bounds_mm = []
@@ -189,117 +197,93 @@ def get_truth(filename, file_idx, in_tpc=False):
 
             # split modules in half, using max_drift_distance from outer x-facing edge
             max_drift_distance = f['geometry_info'].attrs['max_drift_distance']
-            x_min_adj = x_max - max_drift_distance
             # ordering TPC number in descending x
-            tpc_bounds_mm.append(((x_min_adj, y_min, z_min), (x_max, y_max, z_max)))
             x_max_adj = x_min + max_drift_distance
             tpc_bounds_mm.append(((x_min, y_min, z_min), (x_max_adj, y_max, z_max)))
+            x_min_adj = x_max - max_drift_distance
+            tpc_bounds_mm.append(((x_min_adj, y_min, z_min), (x_max, y_max, z_max)))
 
         tpc_bounds_mm = np.array(tpc_bounds_mm)
 
-        # get event in data
-        light_wvfms = f['light/wvfm/data']['samples']
-
-        # for each unique vertex_id, get the segment with the min time
-        first_seg_file_ids = []
-        first_seg_evt_ids = []
-        '''
-        vertex_ids = []
-        vertex_xs = []
-        vertex_ys = []
-        vertex_zs = []
-        vertex_ts = []
-
-        first_seg_ids = []
-        '''
-        first_seg_x = []
-        first_seg_y = []
-        first_seg_z = []
-        first_seg_tpcs = []
-        first_seg_idxs = []
-        first_seg_times = []
-
         # loop over events
-        for i_evt_lrs in range(light_wvfms.shape[0]):
+        for i_evt_lrs in range(f['light/wvfm/data']['samples'].shape[0]):
 
             # get segment to vertex matching
             spill_id = np.unique(f["mc_truth/segments/data"]["event_id"])[i_evt_lrs]
             ev_seg_ids = np.where(f["mc_truth/segments/data"]["event_id"]==spill_id)[0]
 
+            # filter out segments with less than 7500 photons
+            ev_seg_ids = ev_seg_ids[f["mc_truth/segments/data"]["n_photons"][ev_seg_ids] >= 6000]
+
             # get segment's vertex_id and time
-            int_seg_ids = f["mc_truth/segments/data"]["vertex_id"][ev_seg_ids]
+            seg_vertex_ids = f["mc_truth/segments/data"]["vertex_id"][ev_seg_ids]
+            unique_vertex_ids = np.unique(seg_vertex_ids)
 
-            # get segment times
-            segment_times = f["mc_truth/segments/data"]["t0_start"][ev_seg_ids]
+            # loop over vertex ids, and find which tpc each segment is in
+            for vertex_id in unique_vertex_ids:
 
-            # get segment idxs
-            segment_idxs = segment_times%1.2e6*(1000.0/16.0)+100
+                # get subset of ev_seg_ids for this vertex
+                vertex_segs = np.where(f["mc_truth/segments/data"]["vertex_id"]==vertex_id)[0]
+                ev_seg_ids_vertex = np.intersect1d(ev_seg_ids, vertex_segs)
 
-            # segment coordinates
-            seg_xs = f["mc_truth/segments/data"]["x_start"][ev_seg_ids]
-            seg_ys = f["mc_truth/segments/data"]["y_start"][ev_seg_ids]
-            seg_zs = f["mc_truth/segments/data"]["z_start"][ev_seg_ids]
+                # get segment times and sample idx
+                segment_times = f["mc_truth/segments/data"]["t0_start"][ev_seg_ids_vertex]
+                segment_idx = segment_times%1.2e6*(1000.0/16.0)+100
 
-            # loop over unique vertex ids
-            unique_int_seg_ids = np.unique(int_seg_ids)
+                # get segment coordinates
+                seg_xs = f["mc_truth/segments/data"]["x_start"][ev_seg_ids_vertex]
+                seg_ys = f["mc_truth/segments/data"]["y_start"][ev_seg_ids_vertex]
+                seg_zs = f["mc_truth/segments/data"]["z_start"][ev_seg_ids_vertex]
 
-            # loop over segments to find the first segment for each vertex
-            for int in unique_int_seg_ids:
-                segs = np.where(int_seg_ids==int)[0]
+                # loop over segments to find which tpc they are in
+                seg_tpcs = []
+                for seg, seg_id in enumerate(ev_seg_ids_vertex):
 
-                # earliest segment
-                seg_times = segment_times[segs]
-                first_seg = np.argmin(seg_times)
-                first_seg_time = seg_times[first_seg]
-                first_seg_idx = segment_idxs[first_seg]
+                    # for each event, find the TPC number
+                    seg_x = seg_xs[seg]
+                    seg_y = seg_ys[seg]
+                    seg_z = seg_zs[seg]
 
-                # add segment time and sample index
-                first_seg_times.append(first_seg_time)
-                first_seg_idxs.append(first_seg_idx)
+                    # find the TPC number
+                    tpc_mask = np.zeros(len(tpc_bounds_mm))
+                    for j in range(len(tpc_bounds_mm)):
+                        tpc_mask[j] = (seg_x > tpc_bounds_mm[j][0][0]) & (seg_x < tpc_bounds_mm[j][1][0]) & \
+                                      (seg_y > tpc_bounds_mm[j][0][1]) & (seg_y < tpc_bounds_mm[j][1][1]) & \
+                                      (seg_z > tpc_bounds_mm[j][0][2]) & (seg_z < tpc_bounds_mm[j][1][2])
 
-                # add file and event ids
-                first_seg_file_ids.append(file_idx)
-                first_seg_evt_ids.append(i_evt_lrs) #spill_id)
+                    if np.sum(tpc_mask) > 1:
+                        print("More than one TPC found for segment!")
+                        break
+                    elif np.sum(tpc_mask) == 1:
+                        seg_tpc = np.where(tpc_mask)[0][0]
+                    seg_tpcs.append(seg_tpc)
 
-                # for each event, find the TPC number
-                seg_x = seg_xs[first_seg]
-                seg_y = seg_ys[first_seg]
-                seg_z = seg_zs[first_seg]
+                # for each unique seg_tpc, find the argmin of the segment times
+                unique_seg_tpcs = np.unique(seg_tpcs)
+                for tpc in unique_seg_tpcs:
+                    tpc_segs = np.where(seg_tpcs==tpc)[0]
+                    if len(tpc_segs) == 0:
+                        continue
 
-                # add vertex coordinates
-                first_seg_x.append(seg_x)
-                first_seg_y.append(seg_y)
-                first_seg_z.append(seg_z)
+                    # find the segment with the min time
+                    min_idx = np.argmin(segment_times[tpc_segs])
 
-                # find the TPC number
-                first_seg_tpc = -1
-                tpc_mask = np.zeros(len(tpc_bounds_mm))
-                for j in range(len(tpc_bounds_mm)):
-                    tpc_mask[j] = (seg_x > tpc_bounds_mm[j][0][0]) & (seg_x < tpc_bounds_mm[j][1][0]) & \
-                                  (seg_y > tpc_bounds_mm[j][0][1]) & (seg_y < tpc_bounds_mm[j][1][1]) & \
-                                  (seg_z > tpc_bounds_mm[j][0][2]) & (seg_z < tpc_bounds_mm[j][1][2])
+                    # save the segment info
+                    first_seg_file_ids.append(file_idx)
+                    first_seg_evt_ids.append(i_evt_lrs)#spill_id)
+                    first_seg_vertex_ids.append(vertex_id)
+                    first_seg_tpcs.append(tpc)
+                    first_seg_idxs.append(segment_idx[min_idx])
+                    first_seg_times.append(segment_times[min_idx])
 
-                if np.sum(tpc_mask) > 1:
-                    print("More than one TPC found for segment!")
-                    break
-                elif np.sum(tpc_mask) == 1:
-                    first_seg_tpc = np.where(tpc_mask)[0][0]
+        print("Truth info extracted, shapes: ", len(first_seg_file_ids), len(first_seg_evt_ids), len(first_seg_vertex_ids), len(first_seg_tpcs), len(first_seg_idxs), len(first_seg_times))
 
-                # add TPC number
-                first_seg_tpcs.append(first_seg_tpc)
 
         # save event number, tpc number and start time
         event_tpc_start = np.column_stack((first_seg_file_ids, first_seg_evt_ids,
+                                           first_seg_vertex_ids,
                                            first_seg_times, first_seg_idxs,
-                                           first_seg_tpcs, first_seg_x, first_seg_y, first_seg_z))
-
-        # if first file, create the dataframe
-        '''
-        cols = ['file_idx', 'event_id',
-                'vertex_id','v_x', 'v_y', 'v_z', 'v_t',
-                'seg_id', 'seg_x', 'seg_y', 'seg_z',
-                'tpc_num', 'start_time', 'start_time_idx']
-        '''
+                                           first_seg_tpcs))
 
         if in_tpc:
             mask = (first_seg_tpcs >= 0)
@@ -430,15 +414,10 @@ def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing
         truth_information = get_truth(path, i, is_cont)
 
         # save as csv file
-        '''
         cols = ['file_idx', 'event_id',
-                'vertex_id','v_x', 'v_y', 'v_z', 'v_t',
-                'seg_id', 'seg_x', 'seg_y', 'seg_z',
-                'tpc_num', 'start_time', 'start_time_idx']
-        '''
-        cols = ['file_idx', 'event_id',
+                'vertex_id',
                 'start_time', 'start_time_idx',
-                'tpc_num', 'v_x', 'v_y', 'v_z']
+                'tpc_num']
         true_int_output = dirname+'/true_nu_int.csv'
         if i==0:
             print("Creating output: ", true_int_output)
