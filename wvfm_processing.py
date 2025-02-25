@@ -166,7 +166,7 @@ def get_data(filename, calib_filename, geom_filename, channel_status_filename, m
     return wvfms_blsub, noise_thresholds
 
 
-def get_truth(filename, file_idx, in_tpc=False):
+def get_truth(filename, file_idx, in_tpc=False, n_photons_threshold=7500):
     # check if file exists
     if not os.path.exists(filename):
         print('File does not exist:', filename)
@@ -213,7 +213,7 @@ def get_truth(filename, file_idx, in_tpc=False):
             ev_seg_ids = np.where(f["mc_truth/segments/data"]["event_id"]==spill_id)[0]
 
             # filter out segments with less than 7500 photons
-            ev_seg_ids = ev_seg_ids[f["mc_truth/segments/data"]["n_photons"][ev_seg_ids] >= 6000]
+            ev_seg_ids = ev_seg_ids[f["mc_truth/segments/data"]["n_photons"][ev_seg_ids] >= n_photons_threshold]
 
             # get segment's vertex_id and time
             seg_vertex_ids = f["mc_truth/segments/data"]["vertex_id"][ev_seg_ids]
@@ -411,7 +411,7 @@ def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing
         i = 0
 
         print("Getting truth info...")
-        truth_information = get_truth(path, i, is_cont)
+        truth_information = get_truth(path, i, is_cont, 7500)
 
         # save as csv file
         cols = ['file_idx', 'event_id',
