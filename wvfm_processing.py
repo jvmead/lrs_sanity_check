@@ -10,55 +10,7 @@ import argparse
 import json
 import scipy
 from scipy.ndimage import uniform_filter1d
-
-
-
 import matplotlib.pyplot as plt
-def plot_summed_waveform_with_interactions(time_bins, wvfm, height, hits, i_mask=None, i_evt=None, xlim = (0, 16), logy=False, print_int_times=False):
-  # plot the waveform
-  fig, ax1 = plt.subplots(1, 1, figsize=(12, 6))
-
-  # convert i_mask into TPC and TrapType
-  if i_mask is not None:
-    tpc = i_mask // 2
-    trap_type = i_mask % 2
-    if trap_type == 0:
-      trap_type = 'ACL'
-    else:
-      trap_type = 'LCM'
-    ax1.set_title(f'TPC {tpc} {trap_type}')
-
-  if i_mask is not None and i_evt is not None:
-    ax1.set_title(f'TPC {i_mask} Event {i_evt}')
-
-  ylabel = 'SPEs'
-  sqrt_height = np.sqrt(height)
-  if logy:
-    wvfm+=1
-    height+=1
-    ylabel+=' + 1'
-    ax1.set_yscale('log')
-    #ax1.set_ylim(0.99, 1.1 * np.max(wvfm))
-
-  # Linear y-axis plot
-  ax1.plot(time_bins * 1e6, wvfm, color='black')
-  ax1.set_ylabel(ylabel)
-
-  # plot noise floor
-  ax1.axhline(height, color='r', linestyle='--')
-
-  # peaks for interactions
-  ax1.plot(time_bins[hits] * 1e6, wvfm[hits], 'x', color='red', label='Interactions')
-  if print_int_times:
-    for hit in hits:
-      ax1.text(time_bins[hit] * 1e6, wvfm[hit], f'{time_bins[hit]*1e6:.2f}', color='red')
-
-  # formatting
-  #ax1.set_xlim(xlim)
-  #ax1.set_ylim(2 * np.min(wvfm), 1.1 * np.max(wvfm))
-  ax1.legend()
-
-  plt.show()
 
 
 # function for getting the data
@@ -93,7 +45,7 @@ def bookkeeping(filename, is_data, summed=None, max_evts=None):
         if is_data:
             maskfile += '_data.npz'
         else:
-            maskfile += '_mc.npz'
+            maskfile += '_MC.npz'
 
     return dirname, channel_status_filename, geom_filename, calib_filename, maskfile
 
@@ -333,6 +285,8 @@ def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing
     name = filename.split('.hdf5')[0]
     dirname, channel_status_filename, geom_filename, calib_filename, maskfile = bookkeeping(name, is_data, summed, max_evts)
 
+    print(dirname)
+    
     if not os.path.exists(dirname) or overwrite_preprocessing:
         if overwrite_preprocessing:
             print("Directory exists: ", dirname, ", overwriting data...")
@@ -449,7 +403,7 @@ if __name__ == "__main__":
 
     ## timing info
     number_of_cpus = os.cpu_count()
-    clock_speed = 1.0 / time.get_clock_info('thread_time').resolution
+    clock_speed = 1.0 / time.get_clock_info('monotonic').resolution
     flops_per_cycle = 8 # for modern CPUs?
     print("Number of CPUs: ", number_of_cpus)
     print("Clock Speed: ", clock_speed)
