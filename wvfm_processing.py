@@ -14,11 +14,18 @@ import matplotlib.pyplot as plt
 
 
 # function for getting the data
-def bookkeeping(filename, is_data, summed=None, max_evts=None):
+def bookkeeping(filenames, nfiles, is_data, summed=None, max_evts=None):
 
     data = 'mc'
     if is_data:
         data = 'data'
+
+    # make filename string from common prefix + nfiles
+    filename = ''
+    if nfiles > 1:
+        filename += filenames[0]+'_nfiles_'+str(len(filenames))
+    else:
+        filename = filenames
 
     # get dirname
     if max_evts == None:
@@ -52,19 +59,24 @@ def bookkeeping(filename, is_data, summed=None, max_evts=None):
 
 # function for getting baseline and noise threshold per waveform per channel
 def get_baseline_and_noise_threshold(wvfms, n_mad_factor=5.0):
+
     # Initialize median and MAD
     median = np.median(wvfms, axis=-1)
     mad = np.median(np.abs(wvfms - median[..., np.newaxis]), axis=-1)
+
     # identify outliers in the waveform
     mad_factor = n_mad_factor * mad
     noise_mask = np.abs(wvfms - median[..., np.newaxis]) < mad_factor[..., np.newaxis]
     print("Noise mask calculated, shape: ", noise_mask.shape)
+
     # set non mask values to nan
     noise_samples = np.where(noise_mask, wvfms, np.nan)
     print("Noise samples calculated, shape: ", noise_samples.shape)
+
     # calculate noise as stddev of noise_samples
     noise = np.nanstd(noise_samples, axis=-1)
     print("Noise calculated, shape: ", noise.shape)
+
     # calculate baseline as mean of noise_samples
     baseline = np.nanmean(noise_samples, axis=-1)
     print("Baseline calculated, shape: ", baseline.shape)
@@ -128,7 +140,6 @@ def get_truth(filename, file_idx, in_tpc=False, n_photons_threshold=7500):
     with h5py.File(filename, 'r') as f:
 
         # for each unique vertex_id, get the segment with the min time per TPC
-        first_seg_file_ids = []
         first_seg_evt_ids = []
         first_seg_vertex_ids = []
         first_seg_tpcs = []
@@ -199,9 +210,12 @@ def get_truth(filename, file_idx, in_tpc=False, n_photons_threshold=7500):
                     # find the TPC number
                     tpc_mask = np.zeros(len(tpc_bounds_mm))
                     for j in range(len(tpc_bounds_mm)):
-                        tpc_mask[j] = (seg_x > tpc_bounds_mm[j][0][0]) & (seg_x < tpc_bounds_mm[j][1][0]) & \
-                                      (seg_y > tpc_bounds_mm[j][0][1]) & (seg_y < tpc_bounds_mm[j][1][1]) & \
-                                      (seg_z > tpc_bounds_mm[j][0][2]) & (seg_z < tpc_bounds_mm[j][1][2])
+                        tpc_mask[j] = (seg_x > tpc_bounds_mm[j][0][0]) & \
+                                      (seg_x < tpc_bounds_mm[j][1][0]) & \
+                                      (seg_y > tpc_bounds_mm[j][0][1]) & \
+                                      (seg_y < tpc_bounds_mm[j][1][1]) & \
+                                      (seg_z > tpc_bounds_mm[j][0][2]) & \
+                                      (seg_z < tpc_bounds_mm[j][1][2])
 
                     if np.sum(tpc_mask) > 1:
                         print("More than one TPC found for segment!")
@@ -221,20 +235,24 @@ def get_truth(filename, file_idx, in_tpc=False, n_photons_threshold=7500):
                     min_idx = np.argmin(segment_times[tpc_segs])
 
                     # save the segment info
-                    first_seg_file_ids.append(file_idx)
                     first_seg_evt_ids.append(i_evt_lrs)#spill_id)
                     first_seg_vertex_ids.append(vertex_id)
                     first_seg_tpcs.append(tpc)
                     first_seg_idxs.append(segment_idx[min_idx])
                     first_seg_times.append(segment_times[min_idx])
 
-        print("Truth info extracted, shapes: ", len(first_seg_file_ids), len(first_seg_evt_ids), len(first_seg_vertex_ids), len(first_seg_tpcs), len(first_seg_idxs), len(first_seg_times))
+        print("Truth info extracted, shapes: ", len(first_seg_evt_ids),
+                                                len(first_seg_vertex_ids),
+                                                len(first_seg_tpcs),
+                                                len(first_seg_idxs),
+                                                len(first_seg_times))
 
 
         # save event number, tpc number and start time
-        event_tpc_start = np.column_stack((first_seg_file_ids, first_seg_evt_ids,
+        event_tpc_start = np.column_stack((first_seg_evt_ids,
                                            first_seg_vertex_ids,
-                                           first_seg_times, first_seg_idxs,
+                                           first_seg_times,
+                                           first_seg_idxs,
                                            first_seg_tpcs))
 
         if in_tpc:
@@ -278,15 +296,26 @@ def interaction_finder(wvfm, noise,
 
 
 
-def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing, overwrite_hitfinder, save_truth, is_cont):
+def main(path, nfiles, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing, overwrite_hitfinder, save_truth, is_cont):
 
-    # get bookkeeping
-    filename = path.split('/')[-1]
-    name = filename.split('.hdf5')[0]
-    dirname, channel_status_filename, geom_filename, calib_filename, maskfile = bookkeeping(name, is_data, summed, max_evts)
+    # check if path has multiple files
+    if nfiles > 1:
+        print("Multiple files found, processing each file individually...")
 
-    print(dirname)
-    
+        # get bookkeeping
+        filenames = [p.split('/')[-1] for p in path]
+        names = [fn.split('.hdf5')[0] for fn in filenames]
+        dirname, channel_status_filename, geom_filename, calib_filename, maskfile = bookkeeping(names, nfiles, is_data, summed, max_evts)
+
+    else:
+        print("Single file found, processing...")
+
+        # get bookkeeping
+        filename = path[0].split('/')[-1]
+        name = filename.split('.hdf5')[0]
+        dirname, channel_status_filename, geom_filename, calib_filename, maskfile = bookkeeping(name, nfiles, is_data, summed, max_evts)
+
+
     if not os.path.exists(dirname) or overwrite_preprocessing:
         if overwrite_preprocessing:
             print("Directory exists: ", dirname, ", overwriting data...")
@@ -297,7 +326,9 @@ def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing
 
         # make config file json
         config = {'timestamp': str(pd.Timestamp.now()),
-                  'filename': path,
+                  'paths': [p.split('/')[0] for p in path],
+                  'nfiles': len(filenames) if nfiles > 1 else 1,
+                  'filenames': filenames if nfiles > 1 else filename,
                   'is_data': is_data,
                   'save_truth': save_truth,
                   'summed': summed,
@@ -306,82 +337,90 @@ def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing
                   'geom_filename': geom_filename,
                   'channel_status_filename': channel_status_filename,
                   'maskfile': maskfile}
+
         with open(dirname+'/config.json', 'w') as f:
             json.dump(config, f, indent=4)
+
         print("Config file created: config.json")
 
-        # get data
-        # n_mad_factor = 1.4826 # mad->stddev
-        spes_evt, noise_evt = get_data(path, calib_filename, geom_filename, channel_status_filename, maskfile, max_evts)#, n_mad_factor=5.0)
-        print("Data processed, shapes: ", spes_evt.shape, noise_evt.shape)
+        # loop over files
+        for i, p in enumerate(path):
+            print("Processing file: ", p)
 
-        # save data
-        np.savez(dirname+'/spes_evt.npz', spes_evt)
-        np.savez(dirname+'/noise_evt.npz', noise_evt)
+            # get data
+            # n_mad_factor = 1.4826 # mad->stddev
+            spes_evt, noise_evt = get_data(p, calib_filename, geom_filename, channel_status_filename, maskfile, max_evts)
+            print("Data processed, shapes: ", spes_evt.shape, noise_evt.shape)
+
+            # save data
+            np.savez(dirname+'/spes_evt_'+str(i)+'.npz', spes_evt)
+            np.savez(dirname+'/noise_evt_'+str(i)+'.npz', noise_evt)
 
     else:
-        print("Directory exists, loading data...")
-
-        # load data
-        spes_file = np.load(dirname+'/spes_evt.npz')
-        spes_evt = spes_file['arr_0']
-        noise_file = np.load(dirname+'/noise_evt.npz')
-        noise_evt = noise_file['arr_0']
-
-        #tpc_masks = np.load(dirname+'/tpc_masks.npz')
-        #channel_status = np.load(dirname+'/channel_status.npz')
-        #calib = np.load(dirname+'/calib.npz')
-
-        print("Data loaded, shapes: ", spes_evt.shape, noise_evt.shape)
+        print("Directory exists...")
 
     # run hitfinder
     if run_hitfinder:
-        # check if hitfinder has already been run
-        if not os.path.exists(dirname+'/hits_evt.npz') or overwrite_hitfinder:
-            if os.path.exists(dirname+'/hits_evt.npz'):
-                print(dirname+'/hits.npz exists, overwriting...')
+
+        # loop over files
+        for i, p in enumerate(path):
+
+            # load data
+            print("Loading data for hitfinder...")
+            spes_file = np.load(dirname+'/spes_evt_'+str(i)+'.npz')
+            spes_evt = spes_file['arr_0']
+            noise_file = np.load(dirname+'/noise_evt_'+str(i)+'.npz')
+            noise_evt = noise_file['arr_0']
+
+            print("Data loaded, shapes: ", spes_evt.shape, noise_evt.shape)
+
+            # check if hitfinder has already been run
+            if not os.path.exists(dirname+'/hits_evt_'+str(i)+'.npz') or overwrite_hitfinder:
+                if os.path.exists(dirname+'/hits_evt_'+str(i)+'.npz'):
+                    print(dirname+'/hits_evt_'+str(i)+'.npz exists, overwriting...')
+                else:
+                    print(dirname+'/hits_evt_'+str(i)+'.npz does not exist, processing...')
+                print("Running hitfinder...")
+                hits_evt, hits_config = interaction_finder(spes_evt, noise_evt)
+                print("Hitfinder run, shape: ", hits_evt.shape)
+                print("Total hits: ", np.sum(hits_evt != -1))
+
+                # save config
+                with open(dirname+'/hits_config_'+str(i)+'.json', 'w') as f:
+                    json.dump(hits_config, f, indent=4)
+
+                # save hits
+                np.savez(dirname+'/hits_evt_'+str(i)+'.npz', hits_evt)
+
             else:
-                print(dirname+'/hits.npz does not exists, processing...')
-            print("Running hitfinder...")
-            hits_evt, hits_config = interaction_finder(spes_evt, noise_evt)
-            print("Hitfinder run, shape: ", hits_evt.shape)
-            print("Total hits: ", np.sum(hits_evt != -1))
-            # save config
-            with open(dirname+'/hits_config.json', 'w') as f:
-                json.dump(hits_config, f, indent=4)
-            # save hits
-            np.savez(dirname+'/hits_evt.npz', hits_evt)
-        else:
-            print(dirname+'/hits.npz exists, exiting.') #loading hits...')
-            #hits_file = np.load(dirname+'/hits_evt.npz')
-            #hits_evt = hits_file['arr_0']
+                print(dirname+'/hits_evt_'+str(i)+'.npz exists, exiting.') #loading hits...')
+                #hits_file = np.load(dirname+'/hits_evt_'+str(i)+'.npz')
+                #hits_evt = hits_file['arr_0']
 
     # get truth info
     if is_data and save_truth:
         print("No truth information for data...")
 
     if save_truth and not is_data:
-        # file number (muliptle files WIP)
-        i = 0
 
-        print("Getting truth info...")
-        truth_information = get_truth(path, i, is_cont, 7500)
+        # loop over files
+        for i, p in enumerate(path):
 
-        # save as csv file
-        cols = ['file_idx', 'event_id',
-                'vertex_id',
-                'start_time', 'start_time_idx',
-                'tpc_num']
-        true_int_output = dirname+'/true_nu_int.csv'
-        if i==0:
-            print("Creating output: ", true_int_output)
+            # get truth info
+            print("Getting truth info...")
+            truth_information = get_truth(p, i, is_cont, 7500)
+
+            # save as csv file
+            cols = ['event_id',
+                    'vertex_id',
+                    'start_time',
+                    'start_time_idx',
+                    'tpc_num']
+            true_hits_output = dirname+'/true_hits_'+str(i)+'.csv'
+            print("Creating output: ", true_hits_output)
             df = pd.DataFrame(truth_information, columns=cols)
-            df.to_csv(true_int_output, index=False)
-        # for subsequent files, append to the dataframe
-        else:
-            print("Appending to output: ", true_int_output)
-            df = pd.DataFrame(truth_information, columns=cols)
-            df.to_csv(true_int_output, index=False, mode='a', header=False)
+            df.to_csv(true_hits_output, index=False)
+
     else:
         print("Truth information not saved!")
 
@@ -390,7 +429,8 @@ def main(path, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process some waveforms.')
-    parser.add_argument('path', type=str, help='The name of the file to process')
+    parser.add_argument('path', type=str, nargs='+', help='The name(s) of the file(s) to process')
+    parser.add_argument('nfiles', type=int, help='The number of files to process')
     parser.add_argument('--is_data', action='store_true', help='Flag to indicate if the file is data')
     parser.add_argument('--summed', type=str, default=None, help='Summing method for channels')
     parser.add_argument('--max_evts', type=int, default=None, help='Maximum number of events to process')
@@ -413,7 +453,7 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # execute main function for preprocessing data
-    main(args.path, args.is_data, args.summed, args.max_evts, args.run_hitfinder, args.opp, args.ohf, args.get_truth, args.is_cont)
+    main(args.path, args.nfiles, args.is_data, args.summed, args.max_evts, args.run_hitfinder, args.opp, args.ohf, args.get_truth, args.is_cont)
 
     # end timer
     end_time = time.time()
