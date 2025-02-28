@@ -4,8 +4,8 @@ For running on NERSC:
 ```
 pip3 install h5py pandas scipy matplotlib
 ```
-And see local hd5flow installation instractions:
-< https://github.com/lbl-neutrino/h5flow >
+And see local hd5flow installation instructions: https://github.com/lbl-neutrino/h5flow
+Install in an adjacent directory to this repository (or change the paths in the processing script, currently `../h5flow/`, to global)
 
 
 ```
@@ -30,3 +30,4 @@ Data
 python3 wvfm_processing.py /global/cfs/cdirs/dune/www/data/2x2/nearline/flowed_light/data_bin004/mpd_run_hvramp_rctl_105_p350.FLOW.hdf5 --summed TPC --is_data --run_hitfinder
 ```
 
+WIP processing multiple files!
