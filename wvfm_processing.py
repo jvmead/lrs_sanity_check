@@ -406,6 +406,12 @@ def main(path, nfiles, is_data, summed, max_evts, run_hitfinder, overwrite_prepr
         # loop over files
         for i, p in enumerate(path):
 
+            # check if file exists
+            true_hits_output = dirname+'/true_hits_'+str(i)+'.csv'
+            if os.path.exists(true_hits_output):
+                print("Truth information already saved, exiting...")
+                continue
+
             # get truth info
             print("Getting truth info...")
             truth_information = get_truth(p, i, is_cont, 7500)
@@ -416,7 +422,7 @@ def main(path, nfiles, is_data, summed, max_evts, run_hitfinder, overwrite_prepr
                     'start_time',
                     'start_time_idx',
                     'tpc_num']
-            true_hits_output = dirname+'/true_hits_'+str(i)+'.csv'
+            #true_hits_output = dirname+'/true_hits_'+str(i)+'.csv'
             print("Creating output: ", true_hits_output)
             df = pd.DataFrame(truth_information, columns=cols)
             df.to_csv(true_hits_output, index=False)
