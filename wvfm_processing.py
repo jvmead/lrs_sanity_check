@@ -139,6 +139,8 @@ def get_truth(filename, file_idx, in_tpc=False, n_photons_threshold=7500):
     # load file
     with h5py.File(filename, 'r') as f:
 
+        n_events = f['light/wvfm/data']['samples'].shape[0]
+
         # for each unique vertex_id, get the segment with the min time per TPC
         first_seg_evt_ids = []
         first_seg_vertex_ids = []
@@ -168,61 +170,60 @@ def get_truth(filename, file_idx, in_tpc=False, n_photons_threshold=7500):
 
         tpc_bounds_mm = np.array(tpc_bounds_mm)
 
+
+        unique_ids = np.unique(f["mc_truth/segments/data"]["event_id"])
+        photons_threshold = (f["mc_truth/segments/data"]["n_photons"] >= n_photons_threshold)
+        all_event_ids = f["mc_truth/segments/data"]["event_id"][:]
+        all_vertex_id =  f["mc_truth/segments/data"]["vertex_id"][:]
+        all_t0_start = f["mc_truth/segments/data"]["t0_start"][:]
+
+        seg_xs_tot = f["mc_truth/segments/data"]["x_start"][:]
+        seg_ys_tot = f["mc_truth/segments/data"]["y_start"][:]
+        seg_zs_tot = f["mc_truth/segments/data"]["z_start"][:]
+
         # loop over events
-        for i_evt_lrs in range(f['light/wvfm/data']['samples'].shape[0]):
+        for i_evt_lrs in range(n_events):
 
-            # get segment to vertex matching
-            spill_id = np.unique(f["mc_truth/segments/data"]["event_id"])[i_evt_lrs]
-            ev_seg_ids = np.where(f["mc_truth/segments/data"]["event_id"]==spill_id)[0]
+            # get segment to vertex matching & filter out segments with less than 7500 photons
+            spill_id = unique_ids[i_evt_lrs]
+            ev_seg_ids = np.where(all_event_ids==spill_id)[0]
+            if len(ev_seg_ids) == 0:
+                continue
 
-            # filter out segments with less than 7500 photons
-            ev_seg_ids = ev_seg_ids[f["mc_truth/segments/data"]["n_photons"][ev_seg_ids] >= n_photons_threshold]
+            # get segment to vertex matching & filter out segments with less than 7500 photons
+            ev_seg_ids = ev_seg_ids[photons_threshold[ev_seg_ids]]
+            if len(ev_seg_ids) == 0:
+                continue
 
             # get segment's vertex_id and time
-            seg_vertex_ids = f["mc_truth/segments/data"]["vertex_id"][ev_seg_ids]
+            seg_vertex_ids = all_vertex_id[ev_seg_ids]
             unique_vertex_ids = np.unique(seg_vertex_ids)
 
             # loop over vertex ids, and find which tpc each segment is in
             for vertex_id in unique_vertex_ids:
 
                 # get subset of ev_seg_ids for this vertex
-                vertex_segs = np.where(f["mc_truth/segments/data"]["vertex_id"]==vertex_id)[0]
-                ev_seg_ids_vertex = np.intersect1d(ev_seg_ids, vertex_segs)
+                vertex_segs = np.where(all_vertex_id==vertex_id)[0]
+                ev_seg_vertex = np.intersect1d(ev_seg_ids, vertex_segs)
 
                 # get segment times and sample idx
-                segment_times = f["mc_truth/segments/data"]["t0_start"][ev_seg_ids_vertex]
+                segment_times = all_t0_start[ev_seg_vertex]
                 segment_idx = segment_times%1.2e6*(1000.0/16.0)+100
 
                 # get segment coordinates
-                seg_xs = f["mc_truth/segments/data"]["x_start"][ev_seg_ids_vertex]
-                seg_ys = f["mc_truth/segments/data"]["y_start"][ev_seg_ids_vertex]
-                seg_zs = f["mc_truth/segments/data"]["z_start"][ev_seg_ids_vertex]
+                seg_xs = seg_xs_tot[ev_seg_vertex][:]
+                seg_ys = seg_ys_tot[ev_seg_vertex][:]
+                seg_zs = seg_zs_tot[ev_seg_vertex][:]
 
-                # loop over segments to find which tpc they are in
-                seg_tpcs = []
-                for seg, seg_id in enumerate(ev_seg_ids_vertex):
+                tpc_mask = (
+                    (seg_xs[:, None] > tpc_bounds_mm[:, 0, 0]) & (seg_xs[:, None] < tpc_bounds_mm[:, 1, 0]) &
+                    (seg_ys[:, None] > tpc_bounds_mm[:, 0, 1]) & (seg_ys[:, None] < tpc_bounds_mm[:, 1, 1]) &
+                    (seg_zs[:, None] > tpc_bounds_mm[:, 0, 2]) & (seg_zs[:, None] < tpc_bounds_mm[:, 1, 2])
+                )
 
-                    # for each event, find the TPC number
-                    seg_x = seg_xs[seg]
-                    seg_y = seg_ys[seg]
-                    seg_z = seg_zs[seg]
+                seg_tpcs = np.argmax(tpc_mask, axis=1)
+                seg_tpcs[~tpc_mask.any(axis=1)] = -1
 
-                    # find the TPC number
-                    tpc_mask = np.zeros(len(tpc_bounds_mm))
-                    for j in range(len(tpc_bounds_mm)):
-                        tpc_mask[j] = (seg_x > tpc_bounds_mm[j][0][0]) & \
-                                      (seg_x < tpc_bounds_mm[j][1][0]) & \
-                                      (seg_y > tpc_bounds_mm[j][0][1]) & \
-                                      (seg_y < tpc_bounds_mm[j][1][1]) & \
-                                      (seg_z > tpc_bounds_mm[j][0][2]) & \
-                                      (seg_z < tpc_bounds_mm[j][1][2])
-
-                    if np.sum(tpc_mask) > 1:
-                        print("More than one TPC found for segment!")
-                        break
-                    elif np.sum(tpc_mask) == 1:
-                        seg_tpc = np.where(tpc_mask)[0][0]
-                    seg_tpcs.append(seg_tpc)
 
                 # for each unique seg_tpc, find the argmin of the segment times
                 unique_seg_tpcs = np.unique(seg_tpcs)
@@ -296,7 +297,7 @@ def interaction_finder(wvfm, noise,
 
 
 
-def main(path, nfiles, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing, overwrite_hitfinder, save_truth, is_cont):
+def main(path, nfiles, is_data, summed, max_evts, run_hitfinder, overwrite_preprocessing, overwrite_hitfinder, save_truth, overwrite_truth, is_cont):
 
     # check if path has multiple files
     if nfiles > 1:
@@ -409,8 +410,11 @@ def main(path, nfiles, is_data, summed, max_evts, run_hitfinder, overwrite_prepr
             # check if file exists
             true_hits_output = dirname+'/true_hits_'+str(i)+'.csv'
             if os.path.exists(true_hits_output):
-                print("Truth information already saved, exiting...")
-                continue
+                if overwrite_truth:
+                    print("Overwriting truth information...")
+                else:
+                    print("Truth information already saved, exiting...")
+                    continue
 
             # get truth info
             print("Getting truth info...")
@@ -444,6 +448,7 @@ if __name__ == "__main__":
     parser.add_argument('--opp', action='store_true', help='Flag to indicate if preprocessing should be overwritten')
     parser.add_argument('--ohf', action='store_true', help='Flag to indicate if hit finder output should be overwritten')
     parser.add_argument('--get_truth', action='store_true', help='Flag to indicate if truth info should be extracted')
+    parser.add_argument('--owt', action='store_true', help='Flag to indicate if truth info should be overwritten')
     parser.add_argument('--is_cont', action='store_true', help='Flag to indicate if the vertices are contained in active volume')
     args = parser.parse_args()
 
@@ -459,7 +464,7 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # execute main function for preprocessing data
-    main(args.path, args.nfiles, args.is_data, args.summed, args.max_evts, args.run_hitfinder, args.opp, args.ohf, args.get_truth, args.is_cont)
+    main(args.path, args.nfiles, args.is_data, args.summed, args.max_evts, args.run_hitfinder, args.opp, args.ohf, args.get_truth, args.owt, args.is_cont)
 
     # end timer
     end_time = time.time()
