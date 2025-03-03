@@ -147,6 +147,7 @@ def get_truth(filename, file_idx, in_tpc=False, n_photons_threshold=7500):
         first_seg_tpcs = []
         first_seg_idxs = []
         first_seg_times = []
+        first_seg_tpc_pileup = []
 
         # get the geometry info
         mod_bounds_mm = np.array(f['geometry_info'].attrs['module_RO_bounds'])
@@ -167,19 +168,30 @@ def get_truth(filename, file_idx, in_tpc=False, n_photons_threshold=7500):
             tpc_bounds_mm.append(((x_min, y_min, z_min), (x_max_adj, y_max, z_max)))
             x_min_adj = x_max - max_drift_distance
             tpc_bounds_mm.append(((x_min_adj, y_min, z_min), (x_max, y_max, z_max)))
-
         tpc_bounds_mm = np.array(tpc_bounds_mm)
 
-
+        # load values to be masked
         unique_ids = np.unique(f["mc_truth/segments/data"]["event_id"])
         photons_threshold = (f["mc_truth/segments/data"]["n_photons"] >= n_photons_threshold)
+
+        # load values to be saved
         all_event_ids = f["mc_truth/segments/data"]["event_id"][:]
         all_vertex_id =  f["mc_truth/segments/data"]["vertex_id"][:]
         all_t0_start = f["mc_truth/segments/data"]["t0_start"][:]
 
+        # load segment coordinates
         seg_xs_tot = f["mc_truth/segments/data"]["x_start"][:]
         seg_ys_tot = f["mc_truth/segments/data"]["y_start"][:]
         seg_zs_tot = f["mc_truth/segments/data"]["z_start"][:]
+
+        # which tpc segment is in using tpc_bounds_mm
+        tpc_mask = (
+            (seg_xs_tot[:, None] > tpc_bounds_mm[:, 0, 0]) & (seg_xs_tot[:, None] < tpc_bounds_mm[:, 1, 0]) &
+            (seg_ys_tot[:, None] > tpc_bounds_mm[:, 0, 1]) & (seg_ys_tot[:, None] < tpc_bounds_mm[:, 1, 1]) &
+            (seg_zs_tot[:, None] > tpc_bounds_mm[:, 0, 2]) & (seg_zs_tot[:, None] < tpc_bounds_mm[:, 1, 2])
+        )
+        seg_tpc_tot = np.argmax(tpc_mask, axis=1)
+        seg_tpc_tot[~tpc_mask.any(axis=1)] = -1
 
         # loop over events
         for i_evt_lrs in range(n_events):
@@ -211,19 +223,7 @@ def get_truth(filename, file_idx, in_tpc=False, n_photons_threshold=7500):
                 segment_idx = segment_times%1.2e6*(1000.0/16.0)+100
 
                 # get segment coordinates
-                seg_xs = seg_xs_tot[ev_seg_vertex][:]
-                seg_ys = seg_ys_tot[ev_seg_vertex][:]
-                seg_zs = seg_zs_tot[ev_seg_vertex][:]
-
-                tpc_mask = (
-                    (seg_xs[:, None] > tpc_bounds_mm[:, 0, 0]) & (seg_xs[:, None] < tpc_bounds_mm[:, 1, 0]) &
-                    (seg_ys[:, None] > tpc_bounds_mm[:, 0, 1]) & (seg_ys[:, None] < tpc_bounds_mm[:, 1, 1]) &
-                    (seg_zs[:, None] > tpc_bounds_mm[:, 0, 2]) & (seg_zs[:, None] < tpc_bounds_mm[:, 1, 2])
-                )
-
-                seg_tpcs = np.argmax(tpc_mask, axis=1)
-                seg_tpcs[~tpc_mask.any(axis=1)] = -1
-
+                seg_tpcs = seg_tpc_tot[ev_seg_vertex]
 
                 # for each unique seg_tpc, find the argmin of the segment times
                 unique_seg_tpcs = np.unique(seg_tpcs)
@@ -241,6 +241,7 @@ def get_truth(filename, file_idx, in_tpc=False, n_photons_threshold=7500):
                     first_seg_tpcs.append(tpc)
                     first_seg_idxs.append(segment_idx[min_idx])
                     first_seg_times.append(segment_times[min_idx])
+
 
         print("Truth info extracted, shapes: ", len(first_seg_evt_ids),
                                                 len(first_seg_vertex_ids),
