@@ -227,6 +227,7 @@ def get_truth(filename, file_idx, in_tpc=False, n_photons_threshold=7500):
 
                 # for each unique seg_tpc, find the argmin of the segment times
                 unique_seg_tpcs = np.unique(seg_tpcs)
+
                 for tpc in unique_seg_tpcs:
                     tpc_segs = np.where(seg_tpcs==tpc)[0]
                     if len(tpc_segs) == 0:
@@ -266,9 +267,9 @@ def get_truth(filename, file_idx, in_tpc=False, n_photons_threshold=7500):
 
 # interaction finder function
 def interaction_finder(wvfm, noise,
-                       n_noise_factor = 5.0,
-                       n_bins_rolled = 10,
-                       n_sqrt_rt_factor = 5.0,
+                       n_noise_factor = 5,
+                       n_bins_rolled = 2,
+                       n_sqrt_rt_factor = 5,
                        pe_weight = 1.0):
 
   # save hitfinder settings to config
