@@ -267,7 +267,7 @@ def get_truth(filename, file_idx, in_tpc=False, n_photons_threshold=7500):
 # interaction finder function
 def interaction_finder(wvfm, noise,
                        n_noise_factor = 5.0,
-                       n_bins_rolled = 10,
+                       n_bins_rolled = 2,
                        n_sqrt_rt_factor = 5.0,
                        pe_weight = 1.0):
 
