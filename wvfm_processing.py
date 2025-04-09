@@ -10,6 +10,8 @@ import argparse
 import json
 import scipy
 from scipy.ndimage import uniform_filter1d
+from scipy.ndimage import label
+from scipy.signal import find_peaks
 import matplotlib.pyplot as plt
 
 
@@ -266,36 +268,98 @@ def get_truth(filename, file_idx, in_tpc=False, n_photons_threshold=7500):
 
 
 # interaction finder function
+import numpy as np
+from scipy.ndimage import uniform_filter1d
+from scipy.signal import argrelextrema
+
 def interaction_finder(wvfm, noise,
-                       n_noise_factor = 5.0,
-                       n_bins_rolled = 5,
-                       n_sqrt_rt_factor = 5.0,
-                       pe_weight = 1.0):
+                       n_noise_factor=5.0,
+                       n_bins_rolled=5,
+                       n_sqrt_rt_factor=5.0,
+                       pe_weight=1.0,
+                       use_rising_edge=False,
+                       use_local_maxima=True):
+    """
+    Identifies interaction points (first bins over threshold and peaks) in waveforms.
 
-  # save hitfinder settings to config
-  hit_config = {'n_noise_factor': n_noise_factor,
-                'n_bins_rolled': n_bins_rolled,
-                'n_sqrt_rt_factor': n_sqrt_rt_factor,
-                'pe_weight': pe_weight}
+    Parameters:
+    - wvfm: np.ndarray of shape (..., n_bins)
+    - noise: np.ndarray of shape (...)
+    - n_noise_factor: flat threshold multiplier (height)
+    - n_bins_rolled: number of bins for rolling average
+    - n_sqrt_rt_factor: multiplier for dynamic threshold above rolling average
+    - pe_weight: scaling factor for sqrt(rolling average)
+    - use_local_maxima: use scipy's local maxima detection instead of derivative method
 
-  # height = flat threshold over noise (n*sigma)
-  height = n_noise_factor * noise[..., np.newaxis] * np.ones(wvfm.shape[-1])
-  print("Height calculated, shapes: ", height.shape)
+    Returns:
+    - first_bins_over: boolean array of same shape as wvfm, with first crossings
+    - hit_config: dict of parameters used
+    - peak_bins: boolean array marking peaks
+    """
 
-  # dynamic_threshold = rolling threshold of previous 5 bins + n*sqrt(rolling threshold)
-  wvfm_rolled = np.roll(wvfm, n_bins_rolled)
-  rolling_average = uniform_filter1d(wvfm_rolled, size=n_bins_rolled)
-  sqrt_rolling_average = np.sqrt(np.abs(rolling_average) * pe_weight**2)
-  sqrt_rolling_average[sqrt_rolling_average == 0] = 1
-  dynamic_threshold = rolling_average + n_sqrt_rt_factor*sqrt_rolling_average
-  print("Dynamic threshold, shapes: ", dynamic_threshold.shape)
+    # Save config
+    hit_config = {
+        'n_noise_factor': n_noise_factor,
+        'n_bins_rolled': n_bins_rolled,
+        'n_sqrt_rt_factor': n_sqrt_rt_factor,
+        'pe_weight': pe_weight,
+        'use_local_maxima': use_local_maxima
+    }
 
-  # find rising edges
-  bins_over_dynamic_threshold = (wvfm > dynamic_threshold) & (wvfm > height)
-  # remove consecutive bins, keep only the first
-  bins_over_dynamic_threshold[..., 1:] = bins_over_dynamic_threshold[..., 1:] & ~bins_over_dynamic_threshold[..., :-1]
+    # Height threshold (flat noise-based)
+    height = n_noise_factor * noise[..., np.newaxis] * np.ones(wvfm.shape[-1])
 
-  return bins_over_dynamic_threshold, hit_config
+    # Rolling average for dynamic threshold
+    wvfm_rolled = np.concatenate([
+        np.zeros_like(wvfm[..., :n_bins_rolled]),
+        wvfm[..., :-n_bins_rolled]
+    ], axis=-1)
+    rolling_average = uniform_filter1d(wvfm_rolled, size=n_bins_rolled, axis=-1)
+    sqrt_rolling_average = np.sqrt(np.abs(rolling_average)) * pe_weight
+    sqrt_rolling_average[sqrt_rolling_average == 0] = 1  # Prevent zeros
+    dynamic_threshold = rolling_average + n_sqrt_rt_factor * sqrt_rolling_average
+
+    # Find bins over both thresholds
+    bins_over_dynamic_threshold = (wvfm > dynamic_threshold) & (wvfm > height)
+
+    # Find first bins over threshold (rising edge)
+    first_bins_over = bins_over_dynamic_threshold.copy()
+    first_bins_over[..., 1:] &= ~bins_over_dynamic_threshold[..., :-1]
+
+    if use_rising_edge:
+        return first_bins_over, hit_config
+
+    # Peak finding
+    elif use_local_maxima:
+        '''
+        # Use argrelextrema to find local peaks
+        peak_bins = np.zeros_like(wvfm, dtype=bool)
+        for idx in np.ndindex(wvfm.shape[:-1]):
+            peaks = argrelextrema(wvfm[idx], np.greater)[0]
+            peak_bins[idx + (peaks,)] = True
+        peak_bins &= (wvfm > dynamic_threshold) & (wvfm > height)
+        '''
+        # check 5 bins after first_bins_over and add argmax
+        peak_bins = np.zeros_like(wvfm, dtype=bool)
+        first_bins_indices = np.where(first_bins_over)
+        for idx in zip(*first_bins_indices):
+            start_idx = idx[-1]
+            #end_idx = min(start_idx + n_bins_rolled, wvfm.shape[-1])
+            end_idx = min(start_idx + 5, wvfm.shape[-1])
+            peak_bin = np.argmax(wvfm[idx[:-1] + (slice(start_idx, end_idx),)])
+            peak_bins[idx[:-1] + (start_idx + peak_bin,)] = True
+    else:
+        # Derivative-based peak detection
+        wvfm_d1 = np.gradient(wvfm, axis=-1)
+        wvfm_d2 = np.gradient(wvfm_d1, axis=-1)
+
+        peak_bins = (wvfm > dynamic_threshold) & (wvfm > height) & \
+                    (wvfm_d1 < 0) & (wvfm_d2 < 0)
+
+        # Keep only the first peak in consecutive runs
+        peak_bins[..., 1:] &= ~peak_bins[..., :-1]
+
+    return peak_bins, hit_config
 
 
 
