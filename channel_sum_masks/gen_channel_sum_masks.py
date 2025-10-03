@@ -67,11 +67,12 @@ def generate_det_masks(merged_dict, data_shape):
     return detector_masks
 
 
-# generate masks per EPCB so channels can be isolated quickly
+
 def generate_epcb_masks(merged_dict, data_shape):
     # Assuming adc_values_evt.shape is (N_events, 8, 64, N_samples)
     _, n_adcs, n_channels, _ = data_shape
     epcb_masks = []
+
     for tpc_key, detectors in merged_dict.items():
         # Collect all DETs with 2 channels and 6 channels for this TPC
         two_ch_dets = []
@@ -82,9 +83,18 @@ def generate_epcb_masks(merged_dict, data_shape):
                 two_ch_dets.append((info['ADC'], channels))
             elif len(channels) == 6:
                 six_ch_dets.append((info['ADC'], channels))
-        # Sort by ADC then by channel number
-        two_ch_dets.sort()
-        # Group consecutive DETs (by ADC and consecutive channels) for 2-channel DETs
+
+        # Build masks for 6-channel DETs
+        six_masks = []
+        for adc, chs in six_ch_dets:
+            m = np.zeros((n_adcs, n_channels), dtype=bool)
+            for ch in chs:
+                m[adc, ch] = True
+            six_masks.append(m)
+
+        # Build masks for groups of three 2-channel DETs
+        two_masks = []
+        two_ch_dets.sort()  # sort by ADC then channels
         used = set()
         for i in range(len(two_ch_dets)):
             if i in used:
@@ -97,7 +107,7 @@ def generate_epcb_masks(merged_dict, data_shape):
                     continue
                 adc_j, chs_j = two_ch_dets[j]
                 # Same ADC and consecutive channels
-                if adc_j == adc_i and chs_i[-1]+1 == chs_j[0]:
+                if adc_j == adc_i and chs_i[-1] + 1 == chs_j[0]:
                     group.append((adc_j, chs_j))
                     used.add(j)
                     chs_i = chs_j  # move window
@@ -105,18 +115,30 @@ def generate_epcb_masks(merged_dict, data_shape):
                         break
             # If found a group of 3 DETs (6 consecutive channels)
             if len(group) == 3:
-                epcb_mask = np.zeros((n_adcs, n_channels), dtype=bool)
+                m = np.zeros((n_adcs, n_channels), dtype=bool)
                 for adc, chs in group:
                     for ch in chs:
-                        epcb_mask[adc, ch] = True
-                epcb_masks.append(epcb_mask)
-        # Add masks for 6-channel DETs (traptype==0)
-        for adc, chs in six_ch_dets:
-            epcb_mask = np.zeros((n_adcs, n_channels), dtype=bool)
-            for ch in chs:
-                epcb_mask[adc, ch] = True
-            epcb_masks.append(epcb_mask)
+                        m[adc, ch] = True
+                two_masks.append(m)
+
+        # Interleave: 6-channel mask, then 3x2-channel mask, repeat
+        i = j = 0
+        take_six = True  # start with 6-channel to match your original order
+        while i < len(six_masks) or j < len(two_masks):
+            if take_six and i < len(six_masks):
+                epcb_masks.append(six_masks[i]); i += 1
+            elif (not take_six) and j < len(two_masks):
+                epcb_masks.append(two_masks[j]); j += 1
+            else:
+                # If the preferred list is exhausted, take from the other
+                if i < len(six_masks):
+                    epcb_masks.append(six_masks[i]); i += 1
+                elif j < len(two_masks):
+                    epcb_masks.append(two_masks[j]); j += 1
+            take_six = not take_six
+
     return epcb_masks
+
 
 
 def geom_to_masks(geom_filename, data_shape, summed, data):
@@ -152,7 +174,7 @@ def geom_to_masks(geom_filename, data_shape, summed, data):
         masks = generate_tpc_masks(merged_dict, data_shape)
 
     # save masks to file
-    np.save(f'channel_sum_masks/{data}_{summed}', masks)
+    np.save(f'{data}_{summed}', masks)
     return masks
 
 
@@ -161,7 +183,7 @@ data_shape = (0, 8, 64, 1000)
 
 # data masks
 data = 'data'
-geom_filename = 'geom_files/light_module_desc-5.0.0.yaml'
+geom_filename = '/global/homes/j/jvmead/dune/ndlar_flow/data/proto_nd_flow/light_module_desc-5.0.0.yaml'
 # TPC masks
 masks = geom_to_masks(geom_filename, data_shape, 'TPC', 'data')
 # TrapType masks
@@ -172,7 +194,7 @@ masks = geom_to_masks(geom_filename, data_shape, 'EPCB', 'data')
 masks = geom_to_masks(geom_filename, data_shape, 'DET', 'data')
 
 # MC masks
-geom_filename = 'geom_files/light_module_desc-4.0.0.yaml'
+geom_filename = '/global/homes/j/jvmead/dune/ndlar_flow/data/proto_nd_flow/light_module_desc-4.0.0.yaml'
 # TPC masks
 masks = geom_to_masks(geom_filename, data_shape, 'TPC', 'MC')
 # TrapType masks
